@@ -33,7 +33,7 @@ jobs:
           def run(binary,files,data=None):
               args=[binary]+list(map(str,files))
               raw=subprocess.check_output(args,input=data,timeout=90).decode()
-              return [(m[1],int(m[0])) for m in re.findall(r'(?m)^(\d+)\s+([a-z]+)$',raw)]
+              return [(m[1],int(m[0])) for m in re.findall(r'(?m)^[ \t]*(\d+)[ \t]+([a-z]+)[ \t]*$',raw)]
           checked=0
           with tempfile.TemporaryDirectory() as folder:
               rng=random.Random(162)
