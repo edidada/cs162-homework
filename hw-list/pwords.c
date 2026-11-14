@@ -32,23 +32,55 @@
 #include "word_count.h"
 #include "word_helpers.h"
 
-/*
- * main - handle command line, spawning one thread per file.
- */
+struct input_job {
+  const char* path;
+  word_count_list_t* words;
+  int error;
+};
+static void* read_file(void* argument) {
+  struct input_job* job=argument;
+  FILE* input=fopen(job->path,"r");
+  if (!input) { perror(job->path); job->error=1; return NULL; }
+  count_words(job->words,input);
+  if (ferror(input)) job->error=1;
+  if (fclose(input)) job->error=1;
+  return NULL;
+}
 int main(int argc, char* argv[]) {
-  /* Create the empty data structure. */
-  word_count_list_t word_counts;
-  init_words(&word_counts);
-
-  if (argc <= 1) {
-    /* Process stdin in a single thread. */
-    count_words(&word_counts, stdin);
+  word_count_list_t words;
+  init_words(&words);
+  int error=0;
+  if (argc<=1) {
+    count_words(&words,stdin);
+    if (ferror(stdin)) error=1;
   } else {
-    /* TODO */
+    size_t count=(size_t)argc-1, launched=0;
+    pthread_t* threads=calloc(count,sizeof(*threads));
+    struct input_job* jobs=calloc(count,sizeof(*jobs));
+    if (!threads || !jobs) error=1;
+    else {
+      for (size_t i=0;i<count;++i) {
+        jobs[i]=(struct input_job){argv[i+1],&words,0};
+        int result=pthread_create(&threads[i],NULL,read_file,&jobs[i]);
+        if (result) { fprintf(stderr,"pthread_create: %s\n",strerror(result)); error=1; break; }
+        ++launched;
+      }
+      for (size_t i=0;i<launched;++i) {
+        if (pthread_join(threads[i],NULL)) abort();
+        if (jobs[i].error) error=1;
+      }
+    }
+    free(threads); free(jobs);
   }
-
-  /* Output final result of all threads' work. */
-  wordcount_sort(&word_counts, less_count);
-  fprint_words(&word_counts, stdout);
-  return 0;
+  if (!error) {
+    wordcount_sort(&words,less_count);
+    fprint_words(&words,stdout);
+    if (fflush(stdout)) error=1;
+  }
+  while (!list_empty(&words.lst)) {
+    word_count_t* node=list_entry(list_pop_front(&words.lst),word_count_t,elem);
+    free(node->word); free(node);
+  }
+  pthread_mutex_destroy(&words.lock);
+  return error;
 }

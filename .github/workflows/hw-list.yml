@@ -1,0 +1,63 @@
+name: CS162 HW1 lists
+on:
+  push:
+    branches: [edidada/hw-list]
+  workflow_dispatch:
+jobs:
+  lists:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build original targets and sanitized API checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/commit.txt
+          make -C hw-list
+          for variant in l p; do
+            flags='-DPINTOS_LIST'
+            if [ "$variant" = p ]; then flags="$flags -DPTHREADS"; fi
+            cc -g -O1 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie $flags -Ihw-list tests/list_api.c "hw-list/word_count_$variant.c" hw-list/list.c hw-list/debug.c -o "/tmp/list-api-$variant"
+            ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 "/tmp/list-api-$variant" | tee "evidence/api-$variant.txt"
+          done
+      - name: Compare original driver, independent oracle and repeated parallel inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee evidence/oracle.txt
+          import collections,pathlib,re,subprocess,tempfile,random,time
+          def expected(data):
+              return sorted(collections.Counter(w.lower().decode() for w in re.findall(rb'[A-Za-z]+',data) if len(w)>1).items(),key=lambda p:(p[1],p[0]))
+          def run(binary,files,data=None):
+              args=[binary]+(['-f'] if binary.endswith('/words') else [])+list(map(str,files))
+              raw=subprocess.check_output(args,input=data,timeout=90).decode()
+              return [(m[1],int(m[0])) for m in re.findall(r'(?m)^(\d+)\s+([a-z]+)$',raw)]
+          checked=0
+          with tempfile.TemporaryDirectory() as folder:
+              rng=random.Random(162)
+              files=[]
+              for i in range(12):
+                  p=pathlib.Path(folder)/str(i); p.write_bytes(bytes(rng.choice(b'abcXYZ xyz!?09\n') for _ in range(1000))); files.append(p)
+              corpus=[b'',b'a I x',b'AA bb AA!cc',b'lastword']
+              for data in corpus:
+                  for binary in ['hw-list/words','hw-list/lwords','hw-list/pwords']:
+                      assert run(binary,[],data)==expected(data); checked+=1
+              paths=list(pathlib.Path('hw-list/gutenberg').glob('*.txt'))
+              assert paths,'Missing original Gutenberg corpus'
+              for group in [files,paths,paths*2,files+paths]:
+                  want=expected(b'\n'.join(p.read_bytes() for p in group))
+                  for binary in ['hw-list/words','hw-list/lwords','hw-list/pwords']:
+                      start=time.perf_counter(); assert run(binary,group)==want
+                      print(binary,'files',len(group),'seconds',round(time.perf_counter()-start,6)); checked+=1
+              for _ in range(12):
+                  assert run('hw-list/pwords',files*2)==expected(b'\n'.join(p.read_bytes() for p in files*2)); checked+=1
+              assert subprocess.run(['hw-list/pwords','nonexistent-cs162-input'],capture_output=True).returncode!=0; checked+=1
+          print('CLI comparisons passed:',checked)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hw-list-evidence
+          path: evidence
