@@ -31,7 +31,7 @@ jobs:
           def expected(data):
               return sorted(collections.Counter(w.lower().decode() for w in re.findall(rb'[A-Za-z]+',data) if len(w)>1).items(),key=lambda p:(p[1],p[0]))
           def run(binary,files,data=None):
-              args=[binary]+(['-f'] if binary.endswith('/words') else [])+list(map(str,files))
+              args=[binary]+list(map(str,files))
               raw=subprocess.check_output(args,input=data,timeout=90).decode()
               return [(m[1],int(m[0])) for m in re.findall(r'(?m)^(\d+)\s+([a-z]+)$',raw)]
           checked=0
