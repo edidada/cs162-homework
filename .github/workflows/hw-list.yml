@@ -81,6 +81,12 @@ jobs:
               print('Concurrent two-FIFO reads rendezvoused before EOF')
           print('CLI comparisons passed:',checked)
           PY
+      - name: Preserve original pthread observations
+        run: |
+          set -euo pipefail
+          for round in 1 2 3; do timeout 15 hw-list/pthread 4 > "evidence/pthread-4-$round.txt"; done
+          timeout 15 hw-list/pthread 16 > evidence/pthread-16.txt
+          python3 -c 'import re; from pathlib import Path; s=Path("evidence/pthread-16.txt").read_text(); ids=re.findall(r"Thread #([0-9a-f]+) stack:",s); assert len(ids)==16 and len(set(ids))==16; print("Original sample: all 16 worker entries observed")' | tee evidence/pthread-check.txt
       - name: Helgrind shared-list race checks
         run: |
           set -euo pipefail
