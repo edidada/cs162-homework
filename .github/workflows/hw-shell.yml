@@ -1,0 +1,32 @@
+name: CS162 HW2 Shell
+on:
+  push:
+    branches: [edidada/hw-shell]
+  workflow_dispatch:
+jobs:
+  shell:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Original build and supplied tests
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD | tee evidence/commit.txt
+          make -C hw-shell 2>&1 | tee evidence/build.txt
+          (cd hw-shell && bash test.sh) 2>&1 | tee evidence/original-tests.txt
+      - name: Command and controlling terminal checks
+        run: |
+          set -euo pipefail
+          bash tests/hw-shell.sh hw-shell/shell --pty 2>&1 | tee evidence/runtime.txt
+      - name: Sanitized noninteractive checks
+        run: |
+          set -euo pipefail
+          gcc -std=gnu99 -Wall -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie hw-shell/shell.c hw-shell/tokenizer.c -o /tmp/shell-san
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 bash tests/hw-shell.sh /tmp/shell-san 2>&1 | tee evidence/sanitizers.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cs162-hw-shell-evidence
+          path: evidence/
