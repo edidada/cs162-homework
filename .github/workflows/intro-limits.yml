@@ -1,0 +1,80 @@
+name: CS162 HW0 limits and debugger
+on:
+  push:
+    branches: [edidada/hw-intro-limits]
+  workflow_dispatch:
+jobs:
+  intro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build 32-bit programs and inspect compilation stages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-multilib gdb-multiarch qemu-user
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/commit.txt
+          gcc --version > evidence/compiler.txt
+          make -C hw-intro CC='gcc -m32' CFLAGS='-g -O0'
+          file hw-intro/map hw-intro/limits | tee evidence/elf.txt
+          gcc -m32 -g -O0 -S hw-intro/recurse.c -o evidence/recurse.S
+          gcc -m32 -g -O0 -c hw-intro/map.c -o evidence/map.o
+          gcc -m32 -g -O0 -c hw-intro/recurse.c -o evidence/recurse.o
+          objdump -t evidence/map.o > evidence/map-symbols.txt
+          objdump -t evidence/recurse.o > evidence/recurse-symbols.txt
+          objdump -x -d hw-intro/map > evidence/map-linked.txt
+          gcc -m32 -E -DCS162 hw-intro/map.c -o evidence/map.i
+          hw-intro/map | tee evidence/map-run.txt
+          grep -q 'CS 162 is the best!' evidence/map-run.txt
+          ! grep -q 'CS 362 is the best!' evidence/map-run.txt
+      - name: Compare actual soft limits and controlled child limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee evidence/limits-oracle.txt
+          import resource, subprocess
+          keys=[resource.RLIMIT_STACK,resource.RLIMIT_NPROC,resource.RLIMIT_NOFILE]
+          labels=['stack size','process limit','max file descriptors']
+          def check(expected, setup=None):
+              raw=subprocess.check_output(['hw-intro/limits'],preexec_fn=setup,text=True)
+              got=dict(line.split(': ') for line in raw.splitlines())
+              assert got==dict(zip(labels,map(str,expected))),(got,expected)
+              print(raw,end='')
+          current=[resource.getrlimit(k)[0] for k in keys]
+          check(current)
+          target=[min(v,limit) if v!=resource.RLIM_INFINITY else limit for v,limit in zip(current,[4194304,256,128])]
+          def lower():
+              for k,v in zip(keys,target): resource.setrlimit(k,(v,resource.getrlimit(k)[1]))
+          check(target,lower)
+          print('Two 32-bit executions matched all three inherited soft limits')
+          PY
+      - name: Original launcher with documented QEMU and batch GDB adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /home/workspace/code/personal/hw-intro
+          sudo cp hw-intro/map hw-intro/i386-gdb-map.sh /home/workspace/code/personal/hw-intro/
+          sudo cp scripts/intro-debug.gdb /home/workspace/code/personal/hw-intro/
+          printf '%s\n' '#!/bin/bash' 'qemu-i386 -g 1234 "$1" > /tmp/cs162-qemu-map.log 2>&1 &' 'guest=$!' 'trap "kill $guest 2>/dev/null || true" EXIT' 'sleep 1' 'gdb-multiarch -q -batch -x intro-debug.gdb' | sudo tee /usr/local/bin/i386-gdb >/dev/null
+          sudo chmod +x /usr/local/bin/i386-gdb
+          (cd /home/workspace/code/personal/hw-intro && timeout 60 bash i386-gdb-map.sh) 2>&1 | tee evidence/gdb.txt
+          cp /tmp/cs162-qemu-map.log evidence/qemu-map.txt
+          grep -q ZERO_RECURSION_BACKTRACE evidence/gdb.txt
+          grep -q RETURNED_TO_MAIN evidence/gdb.txt
+          grep -q 'exited normally' evidence/gdb.txt
+          python3 - <<'PY' | tee evidence/stack-check.txt
+          import pathlib,re
+          s=pathlib.Path('evidence/qemu-map.txt').read_text()
+          rows=[(int(n),int(a,16)) for n,a in re.findall(r'i is (\d+). Address of i is (0x[0-9a-f]+)',s)]
+          assert [n for n,a in rows]==[3,2,1,0],rows
+          assert all(a>b for (_,a),(_,b) in zip(rows,rows[1:])),rows
+          print('Four recursion frames observed; stack addresses decrease:',rows)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intro-limits-evidence
+          path: evidence

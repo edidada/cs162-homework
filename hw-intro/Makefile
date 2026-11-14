@@ -5,6 +5,7 @@ CC=i386-gcc
 endif
 
 CFLAGS?=-g
+CPPFLAGS+=-DCS162
 BINARIES=map limits
 
 default:
@@ -12,10 +13,10 @@ default:
 	make limits
 
 map: map.c
-	$(CC) $(CFLAGS) map.c recurse.c -o map
+	$(CC) $(CPPFLAGS) $(CFLAGS) map.c recurse.c -o map
 
 limits: limits.c
-	$(CC) $(CFLAGS) limits.c -o limits
+	$(CC) $(CPPFLAGS) $(CFLAGS) limits.c -o limits
 
 clean:
 	rm -f $(BINARIES)
