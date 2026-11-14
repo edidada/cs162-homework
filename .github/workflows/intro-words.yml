@@ -1,0 +1,57 @@
+name: CS162 HW0 words
+on:
+  push:
+    branches: [edidada/hw-intro-words]
+  workflow_dispatch:
+jobs:
+  words:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build original and sanitized application
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/commit.txt
+          make -C hw-intro/words
+          cc -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie hw-intro/words/main.c hw-intro/words/word_count.c hw-intro/words/wc_sort.o -o /tmp/words-sanitized
+      - name: Independent public and boundary oracle
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee evidence/oracle.txt
+          import collections, pathlib, random, re, subprocess, tempfile
+          rng=random.Random(162)
+          corpus=[b'',b'a I z',b'hi',b'abc def AaA\nbbb zzz aaa\na\n',b'hi!Hi?abc123def',b'x'*64,b'\xffAB\x80cd',b'AA\x00BB',b'No trailing newline']
+          for _ in range(60):
+              corpus.append(bytes(rng.choice(b'abcXYZ xyz!?09\n\t') for _ in range(rng.randrange(0,500))))
+          corpus += [p.read_bytes() for p in pathlib.Path('hw-intro/words/gutenberg').glob('*.txt')]
+          checked=0
+          with tempfile.TemporaryDirectory() as directory:
+              for binary in ['hw-intro/words/words','/tmp/words-sanitized']:
+                  for data in corpus:
+                      words=[w.lower().decode() for w in re.findall(rb'[A-Za-z]+',data) if len(w)>1]
+                      assert all(len(w)<=64 for w in words)
+                      for mode in ['-c','-f']:
+                          expected=(f'The total number of words is: {len(words)}\n' if mode=='-c' else 'The frequencies of each word are: \n'+''.join(f'{n}\t{w}\n' for w,n in sorted(collections.Counter(words).items(),key=lambda p:(p[1],p[0])))).encode()
+                          out=subprocess.run([binary,mode],input=data,capture_output=True,check=True).stdout
+                          assert out==expected,(binary,mode,data[:80],out[:100],expected[:100])
+                          checked+=1
+                  a=pathlib.Path(directory)/'a'; a.write_bytes(b'Alpha beta')
+                  b=pathlib.Path(directory)/'b'; b.write_bytes(b'beta GAMMA')
+                  result=subprocess.run([binary,'-f',str(a),str(b)],capture_output=True,check=True)
+                  assert result.stdout==b'The frequencies of each word are: \n1\talpha\n1\tgamma\n2\tbeta\n'
+                  for args,data in [(['missing-cs162-file'],b''),(['-?'],b''),(['-f'],b'x'*65)]:
+                      assert subprocess.run([binary,*args],input=data,capture_output=True).returncode!=0
+                  checked+=4
+          print('CLI oracle cases passed:',checked,'including both builds, Gutenberg, multiple files and errors')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intro-words-evidence
+          path: evidence

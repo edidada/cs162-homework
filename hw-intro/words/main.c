@@ -22,6 +22,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include <assert.h>
+#include <limits.h>
 #include <getopt.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -45,9 +46,18 @@ WordCount *word_counts = NULL;
  * Useful functions: fgetc(), isalpha().
  */
 int num_words(FILE* infile) {
-  int num_words = 0;
-
-  return num_words;
+  if (!infile) return -1;
+  int total = 0, length = 0, c;
+  do {
+    c = fgetc(infile);
+    if (c != EOF && isalpha((unsigned char)c)) {
+      if (length < 2) ++length;
+    } else {
+      if (length > 1) { if (total == INT_MAX) return -1; ++total; }
+      length = 0;
+    }
+  } while (c != EOF);
+  return ferror(infile) ? -1 : total;
 }
 
 /*
@@ -62,7 +72,24 @@ int num_words(FILE* infile) {
  * and 0 otherwise.
  */
 int count_words(WordCount **wclist, FILE *infile) {
-  return 0;
+  if (!wclist || !infile) return 1;
+  char word[MAX_WORD_LEN + 1];
+  size_t length = 0;
+  int c;
+  do {
+    c = fgetc(infile);
+    if (c != EOF && isalpha((unsigned char)c)) {
+      if (length == MAX_WORD_LEN) return 1;
+      word[length++] = (char)tolower((unsigned char)c);
+    } else {
+      if (length > 1) {
+        word[length] = '\0';
+        if (add_word(wclist, word)) return 1;
+      }
+      length = 0;
+    }
+  } while (c != EOF);
+  return ferror(infile) ? 1 : 0;
 }
 
 /*
@@ -70,7 +97,17 @@ int count_words(WordCount **wclist, FILE *infile) {
  * Useful function: strcmp().
  */
 static bool wordcount_less(const WordCount *wc1, const WordCount *wc2) {
-  return 0;
+  return wc1->count != wc2->count ? wc1->count < wc2->count
+                                  : strcmp(wc1->word, wc2->word) < 0;
+}
+
+static void free_words(void) {
+  while (word_counts) {
+    WordCount *next = word_counts->next;
+    free(word_counts->word);
+    free(word_counts);
+    word_counts = next;
+  }
 }
 
 // In trying times, displays a helpful message.
@@ -119,6 +156,8 @@ int main (int argc, char *argv[]) {
               break;
           case 'h':
               return display_help();
+          default:
+              return 1;
       }
   }
 
@@ -127,16 +166,21 @@ int main (int argc, char *argv[]) {
     return display_help();
   }
 
-  /* Create the empty data structure */
-  init_words(&word_counts);
-
-  if ((argc - optind) < 1) {
-    // No input file specified, instead, read from STDIN instead.
-    infile = stdin;
-  } else {
-    // At least one file specified. Useful functions: fopen(), fclose().
-    // The first file can be found at argv[optind]. The last file can be
-    // found at argv[argc-1].
+  if (init_words(&word_counts)) return 1;
+  int first = optind, last = argc;
+  if (first == last) last = first + 1;
+  for (int file = first; file < last; ++file) {
+    bool use_stdin = optind == argc;
+    infile = use_stdin ? stdin : fopen(argv[file], "r");
+    if (!infile) { perror(argv[file]); free_words(); return 1; }
+    int error = 0;
+    if (count_mode) {
+      int count = num_words(infile);
+      if (count < 0 || total_words > INT_MAX - count) error = 1;
+      else total_words += count;
+    } else error = count_words(&word_counts, infile);
+    if (!use_stdin && fclose(infile)) error = 1;
+    if (error) { fprintf(stderr, "Unable to count input words\n"); free_words(); return 1; }
   }
 
   if (count_mode) {
@@ -147,5 +191,6 @@ int main (int argc, char *argv[]) {
     printf("The frequencies of each word are: \n");
     fprint_words(word_counts, stdout);
 }
-  return 0;
+  free_words();
+  return ferror(stdout) ? 1 : 0;
 }

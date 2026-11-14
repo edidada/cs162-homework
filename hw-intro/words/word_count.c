@@ -21,10 +21,12 @@ Mutators take a reference to a list as first arg.
 */
 
 #include "word_count.h"
+#include <limits.h>
 
 /* Basic utilities */
 
 char *new_string(char *str) {
+  if (!str) return NULL;
   char *new_str = (char *) malloc(strlen(str) + 1);
   if (new_str == NULL) {
     return NULL;
@@ -37,8 +39,23 @@ int init_words(WordCount **wclist) {
      Returns 0 if no errors are encountered
      in the body of this function; 1 otherwise.
   */
+  if (!wclist) return 1;
   *wclist = NULL;
-  return 0;
+  if (!wclist || !word) return 1;
+ WordCount *existing = find_word(*wclist, word);
+ if (existing) {
+   if (existing->count == INT_MAX) return 1;
+   ++existing->count;
+   return 0;
+ }
+ WordCount *node = malloc(sizeof(*node));
+ if (!node) return 1;
+ node->word = new_string(word);
+ if (!node->word) { free(node); return 1; }
+ node->count = 1;
+ node->next = *wclist;
+ *wclist = node;
+ return 0;
 }
 
 ssize_t len_words(WordCount *wchead) {
@@ -46,14 +63,17 @@ ssize_t len_words(WordCount *wchead) {
      encountered in the body of
      this function.
   */
-    size_t len = 0;
+    ssize_t len = 0;
+    for (; wchead; wchead = wchead->next) ++len;
     return len;
 }
 
 WordCount *find_word(WordCount *wchead, char *word) {
   /* Return count for word, if it exists */
-  WordCount *wc = NULL;
-  return wc;
+  if (!word) return NULL;
+  for (; wchead; wchead = wchead->next)
+    if (strcmp(wchead->word, word) == 0) return wchead;
+  return NULL;
 }
 
 int add_word(WordCount **wclist, char *word) {
