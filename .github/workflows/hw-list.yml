@@ -43,7 +43,8 @@ jobs:
               corpus=[b'',b'a I x',b'AA bb AA!cc',b'lastword']
               for data in corpus:
                   for binary in ['hw-list/words','hw-list/lwords','hw-list/pwords']:
-                      assert run(binary,[],data)==expected(data); checked+=1
+                      actual=run(binary,[],data); want=expected(data)
+                      assert actual==want,(binary,data,actual,want); checked+=1
               paths=list(pathlib.Path('hw-list/gutenberg').glob('*.txt'))
               assert paths,'Missing original Gutenberg corpus'
               for group in [files,paths,paths*2,files+paths]:
