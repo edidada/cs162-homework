@@ -16,6 +16,12 @@ jobs:
           git rev-parse HEAD > evidence/commit.txt
           make -C hw-intro/words
           cc -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie hw-intro/words/main.c hw-intro/words/word_count.c hw-intro/words/wc_sort.o -o /tmp/words-sanitized
+      - name: Sanitized API and allocation failure checks
+        run: |
+          set -euo pipefail
+          cc -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie -Dmain=words_application_main -Ihw-intro/words -c hw-intro/words/main.c -o /tmp/words-main.o
+          cc -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie -Ihw-intro/words tests/intro_words_api.c /tmp/words-main.o hw-intro/words/word_count.c hw-intro/words/wc_sort.o -Wl,--wrap=malloc -o /tmp/words-api
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 /tmp/words-api | tee evidence/api.txt
       - name: Independent public and boundary oracle
         shell: bash
         env:

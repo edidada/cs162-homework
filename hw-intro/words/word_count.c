@@ -86,6 +86,7 @@ int add_word(WordCount **wclist, char *word) {
 
 void fprint_words(WordCount *wchead, FILE *ofile) {
   /* print word counts to a file */
+  if (!ofile) return;
   WordCount *wc;
   for (wc = wchead; wc; wc = wc->next) {
     fprintf(ofile, "%i\t%s\n", wc->count, wc->word);
