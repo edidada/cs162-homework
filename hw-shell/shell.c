@@ -135,8 +135,9 @@ static void execute(char **argv) {
     } while (true);
     errno = saved;
   }
+  int error = errno;
   perror(argv[0]);
-  _exit(errno == ENOENT ? 127 : 126);
+  _exit(error == ENOENT ? 127 : 126);
 }
 struct command { char **argv; size_t argc; char *in, *out; };
 static bool special(const char *s) {
@@ -265,9 +266,16 @@ static bool builtin(struct command *c, bool *quit) {
     if (c->argc != 2) fprintf(stderr, "usage: cd PATH\n");
     else if (chdir(c->argv[1]) < 0) perror("cd");
   } else if (!strcmp(name, "wait")) {
+    /* Unlike a foreground prompt wait, this builtin waits for termination,
+       including jobs that must first be resumed by an external process. */
     for (struct job *j = jobs; j; j = j->next) {
-      await_job(j);
-      if (stopped(j)) fprintf(stderr, "wait: job %ld is stopped; use fg or bg\n", (long)j->pgid);
+      while (!finished(j)) {
+        int status;
+        pid_t pid = waitpid(-j->pgid, &status, 0);
+        if (pid > 0) record(pid, status);
+        else if (pid < 0 && errno == EINTR) continue;
+        else { perror("waitpid"); break; }
+      }
     }
     collect();
   } else if (!strcmp(name, "fg") || !strcmp(name, "bg")) {

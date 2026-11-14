@@ -19,6 +19,7 @@ jobs:
       - name: Command and controlling terminal checks
         run: |
           set -euo pipefail
+          gcc -std=gnu99 -Wall -Wextra -Werror tests/terminal-check.c -o hw-shell/terminal-check
           bash tests/hw-shell.sh hw-shell/shell --pty 2>&1 | tee evidence/runtime.txt
       - name: Sanitized noninteractive checks
         run: |

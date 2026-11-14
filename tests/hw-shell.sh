@@ -49,6 +49,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # Background launch must return before a slow predecessor, then wait must join it.
     run("/bin/sh -c 'sleep 0.3; echo slow >> ordering' &\n/bin/sh -c 'echo fast >> ordering'\nwait\ncat ordering\n", 'fast\nslow\n')
     run('sleep 0.1 &\nsleep 0.2 &\nwait\necho joined\n', 'joined\n')
+    run("/bin/sh -c 'echo $$ > stopped-pid; kill -STOP $$; echo done > stopped-result' &\n/bin/sh -c 'while test ! -f stopped-pid; do sleep 0.01; done; sleep 0.1; kill -CONT $(cat stopped-pid)' &\nwait\ncat stopped-result\n", 'done\n')
     run('fg 999999\nbg invalid\necho alive\n', 'alive\n')
     # Original bounded tokenizer: long input is rejected, next command still works.
     run('x'*5000+'\necho recovered\n', 'recovered\n')
@@ -93,6 +94,13 @@ try:
     receive(); send('fg\n'); out = receive();
     assert re.search(rb'(?:^|[ ;])-echo(?:[ ;\r\n])', out), out
     checks+=1
+    # Explicit member PID selection, both bg and fg, on a stopped job.
+    send("/bin/sh -c 'echo BG_PID=$$; kill -STOP $$; exec sleep 30' &\n")
+    out = receive(rb'BG_PID=(\d+)\r\n'); child = re.search(rb'BG_PID=(\d+)\r\n', out).group(1)
+    time.sleep(.15); send(b'bg '+child+b'\n'); receive()
+    send(b'fg '+child+b'\n'); time.sleep(.15); send(b'\x03'); receive(); checks+=1
+    send(str(pathlib.Path(shell).parent/'terminal-check')+'\n'); receive(rb'terminal-check-ok\r\n\d+: '); checks+=1
+    send(b'\x1a'); send(b'\x1c'); send('echo signals-survived\n'); receive(rb'signals-survived\r\n\d+: '); checks+=1
     # Nested shell receives terminal signals independently and returns ownership.
     send(shell+'\n'); receive(); send(b'\x03'); send('echo nested-alive\n'); receive(rb'nested-alive\r\n\d+: ')
     send('exit\n'); receive(); send('echo parent-alive\n'); receive(rb'parent-alive\r\n\d+: '); checks+=1
