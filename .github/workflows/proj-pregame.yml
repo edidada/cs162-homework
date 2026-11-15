@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y gcc-multilib qemu-system-x86
+      - run: sudo apt-get update && sudo apt-get install -y gcc-multilib qemu-system-x86 gdb
       - run: |
           set -euo pipefail
           mkdir evidence
@@ -24,6 +24,20 @@ jobs:
             grep -qx PASS "tests/userprog/$name.result"
           done
           objdump -d tests/userprog/stack-align-v > ../../../../evidence/stack-disassembly.txt
+      - name: Remote QEMU GDB trace
+        run: |
+          set -euo pipefail
+          export PATH="$PWD/proj-pregame/src/utils:$PATH"
+          root="$PWD"
+          cd proj-pregame/src/userprog/build
+          pintos --qemu --gdb --filesys-size=2 -p tests/userprog/do-nothing -a do-nothing -- -q -f run do-nothing > "$root/evidence/gdb-qemu.txt" 2>&1 &
+          simulation=$!
+          trap 'kill "$simulation" 2>/dev/null || true' EXIT
+          sleep 2
+          timeout 60 gdb -q -batch -x "$root/tests/pregame.gdb" 2>&1 | tee "$root/evidence/gdb-trace.txt"
+          wait "$simulation"
+          grep -q 'GDB ASSERTIONS PASSED' "$root/evidence/gdb-trace.txt"
+          grep -q 'do-nothing: exit(162)' "$root/evidence/gdb-qemu.txt"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
