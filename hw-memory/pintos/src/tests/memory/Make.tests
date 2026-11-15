@@ -13,8 +13,8 @@ malloc-merge-2 malloc-null realloc-1 realloc-2 realloc-3 realloc-null)
 # pt-grow-stack pt-grow-pusha pt-grow-bad pt-big-stk-obj pt-bad-addr \
 # pt-bad-read pt-write-code pt-write-code2 pt-grow-stk-sc pt-stk-oflow \
 
-tests/memory_TESTS += tests/memory/sbrk-boundaries
-tests/memory/sbrk-boundaries_SRC = tests/memory/sbrk-boundaries.c
+tests/memory_TESTS += tests/memory/sbrk-bounds
+tests/memory/sbrk-bounds_SRC = tests/memory/sbrk-bounds.c
 
 tests/memory_PROGS = $(tests/memory_TESTS)
 

@@ -3,7 +3,7 @@
 #include "tests/lib.h"
 #include "tests/main.h"
 int main(int argc UNUSED, char **argv UNUSED) {
-  test_name = "sbrk-boundaries";
+  test_name = "sbrk-bounds";
   msg("begin");
   unsigned char *start = sbrk(0);
   ASSERT(start != (void *)-1);
