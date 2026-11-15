@@ -39,7 +39,11 @@ char* echo(char* input) {
 
   char* ret;
 
-  /* TODO */
+  char **result = echo_1(&input, clnt);
+  if (!result) { clnt_perror(clnt, "echo failed"); exit(1); }
+  ret = strdup(*result);
+  xdr_free((xdrproc_t)xdr_wrapstring, (char *)result);
+  if (!ret) { perror("strdup"); exit(1); }
 
   clnt_destroy(clnt);
   
@@ -49,7 +53,8 @@ char* echo(char* input) {
 void put(buf key, buf value) {
   CLIENT *clnt = clnt_connect(HOST);
 
-  /* TODO */
+  put_request request = {key, value};
+  if (!put_1(&request, clnt)) { clnt_perror(clnt, "put failed"); exit(1); }
 
   clnt_destroy(clnt);
 }
@@ -59,7 +64,15 @@ buf* get(buf key) {
 
   buf* ret;
 
-  /* TODO */
+  /* rpcgen owns its static result descriptor; transfer payload ownership
+     to this stable wrapper descriptor, which callers release with xdr_free. */
+  static buf owned;
+  buf *result = get_1(&key, clnt);
+  if (!result) { clnt_perror(clnt, "get failed"); exit(1); }
+  xdr_free((xdrproc_t)xdr_buf, (char *)&owned);
+  owned = *result;
+  result->buf_len = 0; result->buf_val = NULL;
+  ret = &owned;
 
   clnt_destroy(clnt);
   

@@ -1,0 +1,34 @@
+name: CS162 RPC
+on:
+  push:
+    branches: [edidada/lab-rpc]
+  workflow_dispatch:
+jobs:
+  rpc:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y rpcbind rpcsvc-proto libtirpc-dev libglib2.0-dev
+      - run: |
+          set -euo pipefail
+          mkdir evidence
+          git rev-parse HEAD > evidence/commit.txt
+          sudo service rpcbind start
+          make -C lab-rpc 2>&1 | tee evidence/build.txt
+          cd lab-rpc
+          ./bin/server > ../evidence/server.txt 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for i in $(seq 1 50); do rpcinfo -t localhost 0x20000001 1 && break; sleep .1; done
+          test "$(./bin/client example 41)" = 42
+          test "$(./bin/client echo 'hello rpc')" = 'hello rpc'
+          ./bin/client put key value
+          test "$(./bin/client get key)" = value
+          gcc -g -I. -I/usr/include/tirpc ../tests/rpc-client.c kv_store_client.c kv_store_clnt.c kv_store_xdr.c -ltirpc -o /tmp/rpc-test
+          /tmp/rpc-test | tee ../evidence/runtime.txt
+          rpcinfo -p localhost | tee ../evidence/rpcinfo.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rpc-evidence
+          path: evidence/

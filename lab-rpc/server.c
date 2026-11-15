@@ -16,7 +16,7 @@
 #define SIG_PF void (*)(int)
 #endif
 
-/* TODO: Add global state. */
+static GHashTable *store;
 
 extern void kvstore_1(struct svc_req *, SVCXPRT *);
 
@@ -46,7 +46,8 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  /* TODO: Initialize state. */
+  store = g_hash_table_new_full(g_bytes_hash, g_bytes_equal,
+                                (GDestroyNotify)g_bytes_unref, (GDestroyNotify)g_bytes_unref);
 
   svc_run();
   fprintf(stderr, "%s", "svc_run returned");
@@ -63,4 +64,35 @@ int *example_1_svc(int *argp, struct svc_req *rqstp) {
   return &result;
 }
 
-/* TODO: Add additional RPC stubs. */
+char **echo_1_svc(char **argp, struct svc_req *rqstp) {
+  static char *result;
+  (void)rqstp;
+  free(result); result = strdup(*argp);
+  return result ? &result : NULL;
+}
+void *put_1_svc(put_request *argp, struct svc_req *rqstp) {
+  static char result;
+  (void)rqstp;
+  GBytes *key = g_bytes_new(argp->key.buf_val, argp->key.buf_len);
+  GBytes *value = g_bytes_new(argp->value.buf_val, argp->value.buf_len);
+  g_hash_table_replace(store, key, value);
+  return &result;
+}
+buf *get_1_svc(buf *argp, struct svc_req *rqstp) {
+  static buf result;
+  (void)rqstp;
+  free(result.buf_val); result.buf_val = NULL; result.buf_len = 0;
+  GBytes *key = g_bytes_new(argp->buf_val, argp->buf_len);
+  GBytes *value = g_hash_table_lookup(store, key);
+  g_bytes_unref(key);
+  if (value) {
+    gsize length;
+    const void *data = g_bytes_get_data(value, &length);
+    if (length) {
+      result.buf_val = malloc(length);
+      if (!result.buf_val) return NULL;
+      memcpy(result.buf_val, data, length); result.buf_len = length;
+    }
+  }
+  return &result;
+}
