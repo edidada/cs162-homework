@@ -19,7 +19,7 @@ continue
 printf "=== INTERRUPT_FRAME ===\n"
 print/x *(struct intr_frame *)$esp
 add-symbol-file tests/userprog/do-nothing 0x08048094
-hbreak _start
+hbreak *_start
 continue
 printf "=== USER_ENTRY ===\n"
 info registers
@@ -50,3 +50,4 @@ print('GDB ASSERTIONS PASSED: user mode, entry stack, SYS_EXIT=1, status=162')
 end
 detach
 quit
+
