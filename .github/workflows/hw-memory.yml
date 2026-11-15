@@ -39,11 +39,9 @@ jobs:
           make -C hw-memory/pintos/src/utils setitimer-helper
           make -C hw-memory/pintos/src/userprog TEST_SUBDIRS=tests/memory
           cd hw-memory/pintos/src/userprog/build
-          make -f Makefile tests/memory/sbrk-page.result TEST_SUBDIRS=tests/memory
-          for name in page small none multi zero rv large mebi fail-1 fail-2 dealloc many counter oom-1 oom-2; do
-            make "tests/memory/sbrk-$name.result" TEST_SUBDIRS=tests/memory
-            grep -qx PASS "tests/memory/sbrk-$name.result"
-          done
+          make check TEST_SUBDIRS=tests/memory
+          test "$(find tests/memory -name '*.result' | wc -l)" -eq 27
+          for result in tests/memory/*.result; do grep -qx PASS "$result"; done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
