@@ -1,0 +1,34 @@
+name: CS162 Pregame
+on:
+  push:
+    branches: [edidada/proj-pregame]
+  workflow_dispatch:
+jobs:
+  pregame:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y gcc-multilib qemu-system-x86
+      - run: |
+          set -euo pipefail
+          mkdir evidence
+          git rev-parse HEAD > evidence/commit.txt
+          export PATH="$PWD/proj-pregame/src/utils:$PATH"
+          chmod +x proj-pregame/src/utils/pintos*
+          make -C proj-pregame/src/utils setitimer-helper
+          make -C proj-pregame/src/userprog > evidence/build.txt 2>&1
+          cd proj-pregame/src/userprog/build
+          for name in do-nothing do-not-much stack-align-v practice-rc; do
+            make "tests/userprog/$name.result"
+            grep -qx PASS "tests/userprog/$name.result"
+          done
+          objdump -d tests/userprog/stack-align-v > ../../../../evidence/stack-disassembly.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pregame-evidence
+          path: |
+            evidence/
+            proj-pregame/src/userprog/build/tests/userprog/*.output
+            proj-pregame/src/userprog/build/tests/userprog/*.result
