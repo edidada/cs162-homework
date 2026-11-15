@@ -14,9 +14,9 @@ jobs:
           git rev-parse HEAD > evidence/commit.txt
           make -C hw-memory/mm_alloc 2>&1 | tee evidence/build.txt
           (cd hw-memory/mm_alloc && ./mm_test) | tee evidence/original.txt
-          gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -I hw-memory/mm_alloc tests/memory-allocator.c hw-memory/mm_alloc/mm_alloc.c -o /tmp/allocator
+          gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -I hw-memory/mm_alloc tests/memory-allocator.c hw-memory/mm_alloc/mm_alloc.c -Wl,--wrap=sbrk -o /tmp/allocator
           /tmp/allocator | tee evidence/runtime.txt
-          gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all -I hw-memory/mm_alloc tests/memory-allocator.c hw-memory/mm_alloc/mm_alloc.c -o /tmp/allocator-ubsan
+          gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all -I hw-memory/mm_alloc tests/memory-allocator.c hw-memory/mm_alloc/mm_alloc.c -Wl,--wrap=sbrk -o /tmp/allocator-ubsan
           /tmp/allocator-ubsan | tee evidence/ubsan.txt
       - uses: actions/upload-artifact@v4
         if: always()

@@ -5,7 +5,13 @@
 #include <unistd.h>
 #include "mm_alloc.h"
 static unsigned state = 162;
-static unsigned random_value(void) { state = state * 1664525u + 1013904223u; return state; }
+static int fail_growth;
+void *__real_sbrk(intptr_t increment);
+void *__wrap_sbrk(intptr_t increment) {
+  if (increment > 0 && fail_growth) return (void *)-1;
+  return __real_sbrk(increment);
+}
+static unsigned random_value(void) { state = state * 1664525u + 1013904223u; return state >> 8; }
 static void check(const unsigned char *p, size_t n, unsigned char value) {
   for (size_t i = 0; i < n; ++i) assert(p[i] == value);
 }
@@ -17,6 +23,10 @@ int main(void) {
   assert(a && b && c); check(a,4096,0); memset(a,37,4096);
   assert((uintptr_t)a % __alignof__(long double) == 0);
   assert(!mm_realloc(a,SIZE_MAX)); check(a,4096,37);
+  fail_growth = 1;
+  assert(!mm_malloc(1024*1024));
+  assert(!mm_realloc(a,1024*1024)); check(a,4096,37);
+  fail_growth = 0;
   mm_free(b); void *brk = sbrk(0);
   unsigned char *small = mm_malloc(128); assert(small == b); check(small,128,0);
   unsigned char *rest = mm_malloc(128); assert(rest > small && rest < c);
