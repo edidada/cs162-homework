@@ -24,24 +24,23 @@ where
     T: AsyncReadExt + Unpin,
 {
     let mut buf = [0; REQUEST_BUF_SIZE];
-
-    let mut start;
     let mut end = 0;
-
-    while {
-        start = end;
-        let len = s.read(&mut buf[start..]).await?;
-        end = start + len;
-        len > 0
-    } {
-        if buf[start..end].contains(&b'\r') {
-            break;
-        }
+    loop {
+        if end == buf.len() { return Err(HttpError::InvalidRequest.into()); }
+        let n = s.read(&mut buf[end..end + 1]).await?;
+        if n == 0 { return Err(HttpError::InvalidRequest.into()); }
+        end += n;
+        if buf[..end].ends_with(b"\r\n\r\n") { break; }
     }
-
-    let mut iter = std::str::from_utf8(&buf[..end])?.trim().split_whitespace();
+    let header = std::str::from_utf8(&buf[..end])?;
+    let line = header.split("\r\n").next().ok_or(HttpError::InvalidRequest)?;
+    let mut iter = line.split_whitespace();
     let method = iter.next().ok_or(HttpError::InvalidRequest)?;
     let path = iter.next().ok_or(HttpError::InvalidRequest)?;
+    let version = iter.next().ok_or(HttpError::InvalidRequest)?;
+    if iter.next().is_some() || !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
+        return Err(HttpError::InvalidRequest.into());
+    }
 
     Ok(Request {
         method: method.to_string(),
