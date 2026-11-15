@@ -15,7 +15,13 @@ jobs:
           mkdir evidence
           git rev-parse HEAD > evidence/commit.txt
           make -C hw-http 2>&1 | tee evidence/build.txt
-          bash tests/http.sh 2>&1 | tee evidence/runtime.txt
+          HTTP_PERFORMANCE=1 bash tests/http.sh 2>&1 | tee evidence/runtime.txt
+      - name: Sanitized network checks
+        run: |
+          set -euo pipefail
+          make -C hw-http clean
+          make -C hw-http CFLAGS='-g -Wall -Wextra -std=gnu99 -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie' 2>&1 | tee evidence/sanitized-build.txt
+          ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 bash tests/http.sh 2>&1 | tee evidence/sanitized-runtime.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:

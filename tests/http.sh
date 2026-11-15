@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 python3 - <<'PY'
+import json, re, struct
 import concurrent.futures, contextlib, http.client, os, pathlib, socket, subprocess, tempfile, threading, time
 binroot=pathlib.Path('hw-http').resolve()
 def port():
@@ -18,7 +19,10 @@ def server(name,args):
         yield p,proc
         assert proc.poll() is None
     finally:
-        os.killpg(proc.pid,15); proc.wait(timeout=5); log.close()
+        if proc.poll() is None: os.killpg(proc.pid,15)
+        proc.wait(timeout=5); log.close()
+        text=pathlib.Path(log.name).read_text()
+        assert 'ERROR: AddressSanitizer' not in text and 'runtime error:' not in text,text
 def get(p,path):
     c=http.client.HTTPConnection('127.0.0.1',p,timeout=10); c.request('GET',path)
     r=c.getresponse(); data=r.read(); headers=dict(r.getheaders()); status=r.status;c.close();return status,headers,data
@@ -32,6 +36,13 @@ with tempfile.TemporaryDirectory() as tmp:
             for path,expected in [('/','root-index'),('/sub','sub-index'),('/sub/','sub-index'),('/empty','')]:
                 status,h,data=get(p,path);assert status==200 and data==expected.encode();assert int(h['Content-Length'])==len(data)
             status,h,data=get(p,'/blob');assert status==200 and data==payload and int(h['Content-Length'])==len(payload)
+            for i in range(20):
+                with socket.create_connection(('127.0.0.1',p)) as bad:
+                    bad.sendall(b'GET /blob HTTP/1.0\r\n\r\n')
+                    bad.setsockopt(socket.SOL_SOCKET,socket.SO_LINGER,struct.pack('ii',1,0))
+            with socket.create_connection(('127.0.0.1',p)) as bad:
+                bad.sendall(b'bad-request\r\n\r\n')
+                response=http.client.HTTPResponse(bad);response.begin();assert response.status==400;response.read()
             assert get(p,'/absent')[0]==404
             assert get(p,'/../secret')[0]==403
             status,h,data=get(p,'/listing'); assert status==200 and b'child.txt' in data and b'..' in data
@@ -94,4 +105,22 @@ with tempfile.TemporaryDirectory() as tmp:
             worker.join(10);assert not worker.is_alive() and not errors,errors
         listener.close(); print(name,'upstream-first repeated binary proxy passed',flush=True)
 print('All four server models passed file and bidirectional proxy checks')
+if os.environ.get('HTTP_PERFORMANCE'):
+    rows=[]
+    with tempfile.TemporaryDirectory() as tmp:
+        pathlib.Path(tmp,'index.html').write_bytes(b'x'*1024)
+        pathlib.Path(tmp,'large').write_bytes(b'y'*262144)
+        for name,workers in [('httpserver',0),('forkserver',0),('threadserver',0),('poolserver',1),('poolserver',3),('poolserver',8)]:
+            with server(name,['--files',tmp,'--num-threads',str(max(1,workers))]) as (p,proc):
+                for n,c,path in [(500,10,'/'),(1000,40,'/'),(300,20,'/large')]:
+                    for repeat in range(3):
+                        out=subprocess.check_output(['ab','-n',str(n),'-c',str(c),f'http://127.0.0.1:{p}{path}'],stderr=subprocess.STDOUT)
+                        assert re.search(rb'Failed requests:\s+0',out),out
+                        key=f'{name}-pool{workers}-n{n}-c{c}-r{repeat}'
+                        pathlib.Path('evidence',key+'.txt').write_bytes(out)
+                        rows.append(dict(model=name,pool=workers,n=n,c=c,path=path,repeat=repeat,rps=float(re.search(rb'Requests per second:\s+([\d.]+)',out)[1]),mean_ms=float(re.search(rb'Time per request:\s+([\d.]+)',out)[1])))
+    pathlib.Path('evidence/performance.json').write_text(json.dumps(rows,indent=2)+'\n')
+    print('Performance sweep passed:',len(rows),'samples, zero failed requests')
+
 PY
+
