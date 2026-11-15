@@ -27,6 +27,25 @@ jobs:
           gcc -g -I. -I/usr/include/tirpc ../tests/rpc-client.c kv_store_client.c kv_store_clnt.c kv_store_xdr.c -ltirpc -o /tmp/rpc-test
           /tmp/rpc-test | tee ../evidence/runtime.txt
           rpcinfo -p localhost | tee ../evidence/rpcinfo.txt
+      - name: Multi-client normal and sanitizer checks
+        run: |
+          set -euo pipefail
+          cd lab-rpc
+          gcc -g -I. -I/usr/include/tirpc ../tests/rpc-large.c kv_store_clnt.c kv_store_xdr.c -ltirpc -o /tmp/rpc-large
+          cd ..
+          bash tests/rpc-extended.sh normal | tee evidence/extended-normal.txt
+          make -C lab-rpc clean
+          make -C lab-rpc CFLAGS="-g -I/usr/include/tirpc $(pkg-config --cflags glib-2.0) -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie" 2>&1 | tee evidence/sanitized-build.txt
+          cd lab-rpc
+          for kind in client large; do
+            extra=''
+            if [ "$kind" = client ]; then extra=kv_store_client.c; fi
+            output=/tmp/rpc-large
+            if [ "$kind" = client ]; then output=/tmp/rpc-test; fi
+            gcc -g -I. -I/usr/include/tirpc -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie ../tests/rpc-$kind.c $extra kv_store_clnt.c kv_store_xdr.c -ltirpc -o "$output"
+          done
+          cd ..
+          ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 bash tests/rpc-extended.sh sanitized | tee evidence/extended-sanitized.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
