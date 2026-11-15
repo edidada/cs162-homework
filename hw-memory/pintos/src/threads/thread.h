@@ -95,6 +95,8 @@ struct thread {
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
+  void *heap_start;
+  void *heap_break;
   uint32_t* pagedir; /* Page directory. */
 
   struct file* open_file; /* Single open file supported. */

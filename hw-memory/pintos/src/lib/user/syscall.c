@@ -109,3 +109,5 @@ void* sbrk(intptr_t increment) {
   /* Homework 4: YOUR CODE HERE */
   return NULL;
 }
+
+void *sbrk(intptr_t increment) { return (void *)syscall1(SYS_SBRK, increment); }

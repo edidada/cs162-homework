@@ -225,6 +225,8 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
     goto done;
   }
 
+  t->heap_start = t->heap_break = NULL;
+
   /* Read program headers. */
   file_ofs = ehdr.e_phoff;
   for (i = 0; i < ehdr.e_phnum; i++) {
@@ -269,6 +271,9 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
           }
           if (!load_segment(file, file_page, (void*)mem_page, read_bytes, zero_bytes, writable))
             goto done;
+          void *end = (void *)ROUND_UP(phdr.p_vaddr + phdr.p_memsz, PGSIZE);
+          if (end > t->heap_start) t->heap_start = end;
+          t->heap_break = t->heap_start;
         } else
           goto done;
         break;

@@ -23,3 +23,31 @@ jobs:
         with:
           name: memory-allocator-evidence
           path: evidence/
+
+  pintos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y gcc-multilib qemu-system-x86
+      - name: Build and run original sbrk tests
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          export PATH="$PWD/hw-memory/pintos/src/utils:$PATH"
+          chmod +x hw-memory/pintos/src/utils/pintos*
+          make -C hw-memory/pintos/src/utils
+          make -C hw-memory/pintos/src/userprog
+          cd hw-memory/pintos/src/userprog/build
+          make -f Makefile tests/memory/sbrk-page.result TEST_SUBDIRS=tests/memory
+          for name in page small none multi zero rv large mebi fail-1 fail-2 dealloc many counter oom-1 oom-2; do
+            make "tests/memory/sbrk-$name.result" TEST_SUBDIRS=tests/memory
+            grep -qx PASS "tests/memory/sbrk-$name.result"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pintos-sbrk-evidence
+          path: |
+            hw-memory/pintos/src/userprog/build/tests/memory/*.output
+            hw-memory/pintos/src/userprog/build/tests/memory/*.result
