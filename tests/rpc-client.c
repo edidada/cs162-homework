@@ -21,5 +21,18 @@ int main(void) {
   char missing_data[]="absent";buf missing={sizeof missing_data,missing_data};got=get(missing);
   assert(got->buf_len==0);xdr_free((xdrproc_t)xdr_buf,(char *)got);
   char *reply=echo("");assert(reply && !*reply);free(reply);
+  CLIENT *tcp = clnt_create("localhost", KVSTORE, KVSTORE_V1, "tcp");
+  assert(tcp);
+  char tcp_key_data[] = {'t',0,'c','p'};
+  buf tcp_key = {sizeof tcp_key_data,tcp_key_data};
+  put_request request = {tcp_key,value};
+  assert(put_1(&request,tcp));
+  got=get_1(&tcp_key,tcp);assert(got && got->buf_len==sizeof value_data);
+  assert(!memcmp(got->buf_val,value_data,sizeof value_data));
+  xdr_free((xdrproc_t)xdr_buf,(char *)got);clnt_destroy(tcp);
+  got=get(tcp_key);assert(got->buf_len==sizeof value_data);
+  assert(!memcmp(got->buf_val,value_data,sizeof value_data));
+  xdr_free((xdrproc_t)xdr_buf,(char *)got);
+  puts("TCP put/get and cross-transport UDP read passed");
   puts("500 binary overwrite/read/echo cycles and empty/missing cases passed");
 }
