@@ -36,7 +36,7 @@ jobs:
           mkdir -p evidence
           export PATH="$PWD/hw-memory/pintos/src/utils:$PATH"
           chmod +x hw-memory/pintos/src/utils/pintos*
-          make -C hw-memory/pintos/src/utils
+          make -C hw-memory/pintos/src/utils setitimer-helper
           make -C hw-memory/pintos/src/userprog
           cd hw-memory/pintos/src/userprog/build
           make -f Makefile tests/memory/sbrk-page.result TEST_SUBDIRS=tests/memory
@@ -51,3 +51,4 @@ jobs:
           path: |
             hw-memory/pintos/src/userprog/build/tests/memory/*.output
             hw-memory/pintos/src/userprog/build/tests/memory/*.result
+
