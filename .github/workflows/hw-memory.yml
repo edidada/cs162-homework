@@ -1,0 +1,25 @@
+name: CS162 Memory allocator
+on:
+  push:
+    branches: [edidada/hw-memory]
+  workflow_dispatch:
+jobs:
+  allocator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -euo pipefail
+          mkdir evidence
+          git rev-parse HEAD > evidence/commit.txt
+          make -C hw-memory/mm_alloc 2>&1 | tee evidence/build.txt
+          (cd hw-memory/mm_alloc && ./mm_test) | tee evidence/original.txt
+          gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -I hw-memory/mm_alloc tests/memory-allocator.c hw-memory/mm_alloc/mm_alloc.c -o /tmp/allocator
+          /tmp/allocator | tee evidence/runtime.txt
+          gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all -I hw-memory/mm_alloc tests/memory-allocator.c hw-memory/mm_alloc/mm_alloc.c -o /tmp/allocator-ubsan
+          /tmp/allocator-ubsan | tee evidence/ubsan.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: memory-allocator-evidence
+          path: evidence/
