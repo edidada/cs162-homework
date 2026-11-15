@@ -9,6 +9,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - run: sudo apt-get update && sudo apt-get install -y gcc-multilib qemu-system-x86 gdb
       - run: |
           set -euo pipefail
@@ -38,6 +40,24 @@ jobs:
           wait "$simulation"
           grep -q 'GDB ASSERTIONS PASSED' "$root/evidence/gdb-trace.txt"
           grep -q 'do-nothing: exit(162)' "$root/evidence/gdb-qemu.txt"
+      - name: Reproduce untouched baseline page fault
+        run: |
+          set -euo pipefail
+          root="$PWD"
+          mkdir /tmp/pregame-baseline
+          git archive 29e02c39bd3ee6a11db4e5c1bf57e20b2d096194 proj-pregame | tar -x -C /tmp/pregame-baseline
+          export PATH="/tmp/pregame-baseline/proj-pregame/src/utils:$PATH"
+          chmod +x /tmp/pregame-baseline/proj-pregame/src/utils/pintos*
+          make -C /tmp/pregame-baseline/proj-pregame/src/utils setitimer-helper
+          make -C /tmp/pregame-baseline/proj-pregame/src/userprog > evidence/baseline-build.txt 2>&1
+          cd /tmp/pregame-baseline/proj-pregame/src/userprog/build
+          pintos --qemu --gdb --filesys-size=2 -p tests/userprog/do-nothing -a do-nothing -- -q -f run do-nothing > "$root/evidence/baseline-qemu.txt" 2>&1 &
+          simulation=$!
+          trap 'kill "$simulation" 2>/dev/null || true' EXIT
+          sleep 2
+          timeout 60 gdb -q -batch -x "$root/tests/pregame-baseline.gdb" 2>&1 | tee "$root/evidence/baseline-gdb.txt"
+          wait "$simulation"
+          grep -q 'BASELINE FAULT ASSERTIONS PASSED' "$root/evidence/baseline-gdb.txt"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

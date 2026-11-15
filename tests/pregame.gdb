@@ -3,15 +3,27 @@ set confirm off
 set architecture i386
 file kernel.o
 target remote :1234
+define dump_all
+  set $node = all_list.head.next
+  set $offset = (unsigned int)&((struct thread *)0)->allelem
+  while $node != &all_list.tail
+    set $thread = (struct thread *)((char *)$node - $offset)
+    print $thread
+    print *$thread
+    set $node = $node->next
+  end
+end
 break process_execute
 continue
 printf "=== PROCESS_EXECUTE ===\n"
+dump_all
 print file_name
 print *(struct thread *)((unsigned int)$esp & ~4095)
 bt
 break start_process
 continue
 printf "=== START_PROCESS ===\n"
+dump_all
 print *(struct thread *)((unsigned int)$esp & ~4095)
 bt
 break intr_exit if ((struct intr_frame *)$esp)->cs == 0x1b
