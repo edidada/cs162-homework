@@ -1,0 +1,23 @@
+name: CS162 HTTP
+on:
+  push:
+    branches: [edidada/hw-http]
+  workflow_dispatch:
+jobs:
+  http:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y apache2-utils
+      - run: |
+          set -euo pipefail
+          mkdir evidence
+          git rev-parse HEAD > evidence/commit.txt
+          make -C hw-http 2>&1 | tee evidence/build.txt
+          bash tests/http.sh 2>&1 | tee evidence/runtime.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: http-evidence
+          path: evidence/

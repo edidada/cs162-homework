@@ -31,40 +31,85 @@ char* server_files_directory;
 char* server_proxy_hostname;
 int server_proxy_port;
 
+static int write_all(int fd, const void *data, size_t n) {
+  const char *p = data;
+  while (n) {
+    ssize_t sent = write(fd, p, n);
+    if (sent < 0 && errno == EINTR) continue;
+    if (sent <= 0) return -1;
+    p += sent; n -= sent;
+  }
+  return 0;
+}
+static void error_response(int fd, int status) {
+  http_start_response(fd, status);
+  http_send_header(fd, "Content-Length", "0");
+  http_end_headers(fd);
+}
+static void destroy_request(struct http_request *r) {
+  if (r) { free(r->method); free(r->path); free(r); }
+}
+struct relay { int from, to; };
+static void *relay_stream(void *arg) {
+  struct relay *r = arg;
+  char buffer[16384];
+  while (1) {
+    ssize_t n = read(r->from, buffer, sizeof buffer);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0 || write_all(r->to, buffer, (size_t)n) < 0) break;
+  }
+  /* Socket lifetime belongs to the handler, after both workers have joined. */
+  shutdown(r->from, SHUT_RDWR); shutdown(r->to, SHUT_RDWR);
+  return NULL;
+}
+#ifdef THREADSERVER
+struct client_task { int fd; void (*handler)(int); };
+static void *serve_client(void *arg) {
+  struct client_task task = *(struct client_task *)arg;
+  free(arg); task.handler(task.fd); return NULL;
+}
+#endif
+
 /*
  * Serves the contents the file stored at `path` to the client socket `fd`.
  * It is the caller's reponsibility to ensure that the file stored at `path` exists.
  */
 void serve_file(int fd, char* path) {
-
-  /* TODO: PART 2 */
-  /* PART 2 BEGIN */
-
+  int file = open(path, O_RDONLY);
+  struct stat st;
+  if (file < 0) { error_response(fd, 404); return; }
+  if (fstat(file, &st) < 0 || !S_ISREG(st.st_mode)) {
+    close(file); error_response(fd, 404); return;
+  }
+  char length[64]; snprintf(length, sizeof length, "%lld", (long long)st.st_size);
   http_start_response(fd, 200);
   http_send_header(fd, "Content-Type", http_get_mime_type(path));
-  http_send_header(fd, "Content-Length", "0"); // TODO: change this line too
-  http_end_headers(fd);
-
-  /* PART 2 END */
+  http_send_header(fd, "Content-Length", length); http_end_headers(fd);
+  char buffer[16384];
+  while (1) {
+    ssize_t n = read(file, buffer, sizeof buffer);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0 || write_all(fd, buffer, (size_t)n) < 0) break;
+  }
+  close(file);
 }
-
 void serve_directory(int fd, char* path) {
+  DIR *dir = opendir(path);
+  if (!dir) { error_response(fd, 404); return; }
   http_start_response(fd, 200);
-  http_send_header(fd, "Content-Type", http_get_mime_type(".html"));
-  http_end_headers(fd);
-
-  /* TODO: PART 3 */
-  /* PART 3 BEGIN */
-
-  // TODO: Open the directory (Hint: opendir() may be useful here)
-
-  /**
-   * TODO: For each entry in the directory (Hint: look at the usage of readdir() ),
-   * send a string containing a properly formatted HTML. (Hint: the http_format_href()
-   * function in libhttp.c may be useful here)
-   */
-
-  /* PART 3 END */
+  http_send_header(fd, "Content-Type", "text/html"); http_end_headers(fd);
+  struct dirent *entry;
+  while ((entry = readdir(dir))) {
+    if (!strcmp(entry->d_name, ".")) continue;
+    size_t n = strlen(path) + 2 * strlen(entry->d_name) + 64;
+    char *link = malloc(n);
+    if (!link) break;
+    /* Drop the filesystem dot prefix to produce root-relative links. */
+    http_format_href(link, path[0] == '.' ? path + 1 : path, entry->d_name);
+    int result = write_all(fd, link, strlen(link)); free(link);
+    if (result < 0) break;
+  }
+  closedir(dir);
 }
 
 /*
@@ -81,47 +126,29 @@ void serve_directory(int fd, char* path) {
  *   Closes the client socket (fd) when finished.
  */
 void handle_files_request(int fd) {
-
-  struct http_request* request = http_request_parse(fd);
-
-  if (request == NULL || request->path[0] != '/') {
-    http_start_response(fd, 400);
-    http_send_header(fd, "Content-Type", "text/html");
-    http_end_headers(fd);
-    close(fd);
-    return;
-  }
-
-  if (strstr(request->path, "..") != NULL) {
-    http_start_response(fd, 403);
-    http_send_header(fd, "Content-Type", "text/html");
-    http_end_headers(fd);
-    close(fd);
-    return;
-  }
-
-  /* Add `./` to the beginning of the requested path */
-  char* path = malloc(2 + strlen(request->path) + 1);
-  path[0] = '.';
-  path[1] = '/';
-  memcpy(path + 2, request->path, strlen(request->path) + 1);
-
-  /*
-   * TODO: PART 2 is to serve files. If the file given by `path` exists,
-   * call serve_file() on it. Else, serve a 404 Not Found error below.
-   * The `stat()` syscall will be useful here.
-   *
-   * TODO: PART 3 is to serve both files and directories. You will need to
-   * determine when to call serve_file() or serve_directory() depending
-   * on `path`. Make your edits below here in this function.
-   */
-
-  /* PART 2 & 3 BEGIN */
-
-  /* PART 2 & 3 END */
-
-  close(fd);
-  return;
+  struct http_request *request = http_request_parse(fd);
+  char *path = NULL;
+  if (!request || request->path[0] != '/') { error_response(fd, 400); goto done; }
+  if (strcmp(request->method, "GET")) { error_response(fd, 405); goto done; }
+  if (strstr(request->path, "..")) { error_response(fd, 403); goto done; }
+  path = malloc(strlen(request->path) + 2);
+  if (!path) { error_response(fd, 500); goto done; }
+  sprintf(path, ".%s", request->path);
+  struct stat st;
+  if (stat(path, &st) < 0) error_response(fd, 404);
+  else if (S_ISREG(st.st_mode)) serve_file(fd, path);
+  else if (S_ISDIR(st.st_mode)) {
+    char *index = malloc(strlen(path) + 12);
+    if (!index) error_response(fd, 500);
+    else {
+      sprintf(index, "%s/index.html", path);
+      if (stat(index, &st) == 0 && S_ISREG(st.st_mode)) serve_file(fd, index);
+      else serve_directory(fd, path);
+      free(index);
+    }
+  } else error_response(fd, 404);
+done:
+  free(path); destroy_request(request); close(fd);
 }
 
 /*
@@ -175,7 +202,7 @@ void handle_proxy_request(int fd) {
 
   if (connection_status < 0) {
     /* Dummy request parsing, just to be compliant. */
-    http_request_parse(fd);
+    destroy_request(http_request_parse(fd));
 
     http_start_response(fd, 502);
     http_send_header(fd, "Content-Type", "text/html");
@@ -187,7 +214,15 @@ void handle_proxy_request(int fd) {
 
   /* TODO: PART 4 */
   /* PART 4 BEGIN */
-
+  struct relay directions[2] = {{fd, target_fd}, {target_fd, fd}};
+  pthread_t workers[2];
+  int first = pthread_create(&workers[0], NULL, relay_stream, &directions[0]);
+  int second = first ? first : pthread_create(&workers[1], NULL, relay_stream, &directions[1]);
+  if (first || second) {
+    shutdown(fd, SHUT_RDWR); shutdown(target_fd, SHUT_RDWR);
+    if (!first) pthread_join(workers[0], NULL);
+  } else { pthread_join(workers[0], NULL); pthread_join(workers[1], NULL); }
+  close(target_fd); close(fd);
   /* PART 4 END */
 }
 
@@ -206,7 +241,8 @@ void* handle_clients(void* void_request_handler) {
 
   /* TODO: PART 7 */
   /* PART 7 BEGIN */
-
+  for (;;) request_handler(wq_pop(&work_queue));
+  return NULL;
   /* PART 7 END */
 }
 
@@ -217,7 +253,13 @@ void init_thread_pool(int num_threads, void (*request_handler)(int)) {
 
   /* TODO: PART 7 */
   /* PART 7 BEGIN */
-
+  wq_init(&work_queue);
+  for (int i = 0; i < num_threads; ++i) {
+    pthread_t worker;
+    if (pthread_create(&worker, NULL, handle_clients, (void *)request_handler)) {
+      fprintf(stderr, "Cannot create pool worker\n"); exit(1);
+    }
+  }
   /* PART 7 END */
 }
 #endif
@@ -263,7 +305,8 @@ void serve_forever(int* socket_number, void (*request_handler)(int)) {
    */
 
   /* PART 1 BEGIN */
-
+  if (bind(*socket_number, (struct sockaddr *)&server_address, sizeof server_address) < 0 ||
+      listen(*socket_number, 1024) < 0) { perror("bind/listen"); exit(1); }
   /* PART 1 END */
   printf("Listening on port %d...\n", server_port);
 
@@ -310,7 +353,10 @@ void serve_forever(int* socket_number, void (*request_handler)(int)) {
      */
 
     /* PART 5 BEGIN */
-
+    pid_t child = fork();
+    if (child == 0) { close(*socket_number); request_handler(client_socket_number); _exit(0); }
+    if (child < 0) perror("fork");
+    close(client_socket_number);
     /* PART 5 END */
 
 #elif THREADSERVER
@@ -325,7 +371,16 @@ void serve_forever(int* socket_number, void (*request_handler)(int)) {
      */
 
     /* PART 6 BEGIN */
-
+    struct client_task *task = malloc(sizeof *task);
+    if (!task) { close(client_socket_number); continue; }
+    task->fd = client_socket_number; task->handler = request_handler;
+    pthread_attr_t attr; pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_t worker;
+    if (pthread_create(&worker, &attr, serve_client, task)) {
+      free(task); close(client_socket_number);
+    }
+    pthread_attr_destroy(&attr);
     /* PART 6 END */
 #elif POOLSERVER
     /*
@@ -337,7 +392,7 @@ void serve_forever(int* socket_number, void (*request_handler)(int)) {
      */
 
     /* PART 7 BEGIN */
-
+    wq_push(&work_queue, client_socket_number);
     /* PART 7 END */
 #endif
   }
@@ -367,6 +422,9 @@ void exit_with_usage() {
 int main(int argc, char** argv) {
   signal(SIGINT, signal_callback_handler);
   signal(SIGPIPE, SIG_IGN);
+#ifdef FORKSERVER
+  signal(SIGCHLD, SIG_IGN);
+#endif
 
   /* Default settings */
   server_port = 8000;
@@ -433,7 +491,7 @@ int main(int argc, char** argv) {
   }
 #endif
 
-  chdir(server_files_directory);
+  if (server_files_directory && chdir(server_files_directory) < 0) { perror("chdir"); return 1; }
   serve_forever(&server_fd, request_handler);
 
   return EXIT_SUCCESS;
