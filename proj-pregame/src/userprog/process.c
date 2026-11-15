@@ -475,7 +475,7 @@ static bool setup_stack(void** esp) {
     if (success) {
       /* Pregame assumes one program name and no command-line arguments.
          Reserve fake return/argc/argv words within the zero-filled page. */
-      *esp = (uint8_t *)PHYS_BASE - 12;
+      *esp = (uint8_t *)PHYS_BASE - 20;
       ((uint32_t *)*esp)[1] = 1;
     } else
       palloc_free_page(kpage);
@@ -565,3 +565,4 @@ void pthread_exit(void) {}
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
 void pthread_exit_main(void) {}
+
