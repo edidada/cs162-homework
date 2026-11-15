@@ -46,6 +46,14 @@ with tempfile.TemporaryDirectory() as tmp:
                 assert get(p,'/sub')[2]==b'sub-index';stalled.close()
             if name=='poolserver':
                 assert len(list(pathlib.Path(f'/proc/{proc.pid}/task').iterdir()))==4
+                held=[socket.create_connection(('127.0.0.1',p)) for _ in range(3)]
+                for conn in held:conn.sendall(b'GET ')
+                time.sleep(.1)
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future=pool.submit(get,p,'/sub');time.sleep(.15);assert not future.done()
+                    held[0].sendall(b'/sub HTTP/1.0\r\n\r\n')
+                    assert future.result(timeout=5)[2]==b'sub-index'
+                for conn in held:conn.close()
             out=subprocess.check_output(['ab','-n','500','-c','10',f'http://127.0.0.1:{p}/'],stderr=subprocess.STDOUT)
             assert b'Failed requests:        0' in out,out
             pathlib.Path(f'evidence/{name}-ab.txt').write_bytes(out)

@@ -105,7 +105,7 @@ void serve_directory(int fd, char* path) {
     char *link = malloc(n);
     if (!link) break;
     /* Drop the filesystem dot prefix to produce root-relative links. */
-    http_format_href(link, path[0] == '.' ? path + 1 : path, entry->d_name);
+    http_format_href(link, path[0] == '.' && path[1] == '/' ? path + 2 : path, entry->d_name);
     int result = write_all(fd, link, strlen(link)); free(link);
     if (result < 0) break;
   }
